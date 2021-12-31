@@ -12,4 +12,4 @@ client = MyClient(commands.when_mentioned_or('!'))
 # Cog (Command Group) contains a group of commands to invoke separataley
 client.add_cog(General(client))
 # We're running the client with the specified token
-client.run(os.getenv('DISCORD_TOKEN'))
+client.run('OTI2NTE0NjM4OTI4MDg1MTEz.Yc8x_w.rrO_r6cp3AKrurgCLwHD3fc44xg')

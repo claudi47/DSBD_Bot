@@ -79,8 +79,8 @@ class General(commands.Cog):
         else:
             response_data = response_csv_filename.json()
             csv_file_path = os.path.abspath(
-                r'C:\Users\claud\Desktop\Advanced Programming Languages\Computing_Parsing_APL\Computing_Parsing_Module\Computing_Parsing_Module\\'
-                + response_data['filename'])
+                r'C:\Users\claud\Desktop\Distributed Systems and Big Data\DSBD_Project\\'
+                + response_data['filename'].replace('"', ''))
             with open(csv_file_path, "rb") as file:  # opening in read-binary mode
                 # instance of discord File class that wants the filepointer and his new name (optional)
                 discord_file = discord.File(file, f"goldbet_search_{ctx.author.name}_{category}_goldbet.csv")
@@ -126,3 +126,12 @@ class General(commands.Cog):
         # await is a command similar to return but for async functions
         # await is necessary when a context switch happens (for example when two command are invoked simultaneously)
         # the funct stops and resumes his work after the other event finishes
+
+    @commands.command()
+    async def stat(self, ctx, stat: int):
+        result = requests.get(f"http://localhost:8000/bot/stats?stat={stat}")
+        response = result.json()
+        newline = "\n"
+        if stat == 1:
+            await ctx.send(f"The number of users that used the bot is: {str(response['count'])}\n"
+                           f"They're: {newline.join(response['names'])}")
