@@ -42,7 +42,7 @@ async def _call_retry(function, retry_counter, *args):
     while retry_counter > 0:
         try:
             return function(*args)
-        except:
+        except Exception as ex:
             retry_counter -= 1
 
 
@@ -110,8 +110,8 @@ class General(commands.Cog):
         else:
             response_data = response_csv_filename.json()
             csv_file_path = os.path.abspath(
-                r'C:\Users\claud\Desktop\Advanced Programming Languages\Computing_Parsing_APL\Computing_Parsing_Module\Computing_Parsing_Module\\'
-                + response_data['filename'])
+                r'C:\Users\claud\Desktop\Distributed Systems and Big Data\DSBD_Project\\'
+                + response_data['filename'].replace('"', ''))
             with open(csv_file_path, "rb") as file:  # opening in read-binary mode
                 # instance of discord File class that wants the filepointer and his new name (optional)
                 discord_file = discord.File(file, f"bwin_search_{ctx.author.name}_{category}_bwin.csv")
@@ -130,8 +130,69 @@ class General(commands.Cog):
     @commands.command()
     async def stat(self, ctx, stat: int):
         result = requests.get(f"http://localhost:8000/bot/stats?stat={stat}")
-        response = result.json()
-        newline = "\n"
-        if stat == 1:
-            await ctx.send(f"The number of users that used the bot is: {str(response['count'])}\n"
-                           f"They're: {newline.join(response['names'])}")
+        match stat:
+            case 1:
+                response = result.json()
+                await ctx.send(f"The number of users that used the bot is: {response['count']}\n"
+                               f"They're: {', '.join(user['username'] for user in response['users'])}")
+            case 2:
+                await ctx.send(f"The number of researches made by the users is: {result.text}")
+            case 3:
+                response = result.json()
+                await ctx.send(f"The number of researches done in Goldbet website is: {response['goldbet']}\n"
+                               f"The number of researches done in Bwin website is: {response['bwin']}")
+            case 4:
+                response = result.json()
+                message = ''
+                for user in response['users']:
+                    message += f"{user['username']}, {user['count']}\n"
+                await ctx.send(f"The average number of research for user is: {response['average']}\n"
+                               "Research for each user: \n"
+                               f"{message}")
+
+    @commands.command()
+    async def settings(self, ctx, type_of, *args):
+        match type_of:
+            case 'ban':
+                try:
+                    if args[1] == 'perma':
+                        result = requests.post("http://localhost:8000/bot/settings", params={'setting': 'ban'},
+                                               data={'user': args[0], 'period': 'perma'})
+                    else:
+                        result = requests.post("http://localhost:8000/bot/settings", params={'setting': 'ban'},
+                                           data={'user': args[0], 'period': args[1]})
+                    if not result.ok:
+                        return await ctx.send('Error during the suspension of the user')
+                    return
+                except IndexError:
+                    return await ctx.send('Missing arguments: user and period are needed')
+            case 'unban':
+                try:
+                    result = requests.post("http://localhost:8000/bot/settings", params={'setting': 'ban'},
+                                           data={'user': args[0], 'period': 'null'})
+                    if not result.ok:
+                        return await ctx.send('Error during the unban of the user')
+                    return
+                except IndexError:
+                    return await ctx.send('Missing arguments: user and period are needed')
+            case 'max_searches':
+                try:
+                    result = requests.post("http://localhost:8000/bot/settings", params={'setting': 'max_r'},
+                                           data={'user': args[0], 'limit': args[1]})
+                    if not result.ok:
+                        return await ctx.send('Error during the limit setting of researches for the user')
+                    return
+                except IndexError:
+                    return await ctx.send('Missing arguments: user and limit are needed')
+            case 'toggle':
+                try:
+                    if args[1] != 'enable' and args[1] != 'disable':
+                        return await ctx.send('The state must be enable/disable')
+                    result = requests.post('http://localhost:8000/bot/settings', params={'setting': 'toggle'},
+                                           data={'web_site': args[0], 'state': args[1]})
+                    if not result.ok:
+                        return await ctx.send('Error during the toggle of the websites')
+                    return
+                except IndexError:
+                    return await ctx.send('Error during the toggle of the websites: website and state are needed')
+
