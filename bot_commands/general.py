@@ -24,7 +24,7 @@ def _get_search_data(ctx: Context, bet_data: BettingData, website):
 
 
 async def _validation(ctx: Context, website):
-    can_execute = requests.get(f'http://localhost:8000/bot/validation/?user_id={ctx.author.id}&website={website}')
+    can_execute = requests.get(f'http://server:8000/bot/validation/?user_id={ctx.author.id}&website={website}')
     if not can_execute.ok:
         return False, "Validation error!"
     validation_data = can_execute.text
@@ -70,7 +70,7 @@ class General(commands.Cog):
         search_data = _get_search_data(ctx, bet_data, 'goldbet')
         if search_data is not None:
             # sending json object to web server through POST method
-            response_csv_filename = requests.post('http://localhost:8000/bot/goldbet/', json=search_data.data)
+            response_csv_filename = requests.post('http://server:8000/bot/goldbet/', json=search_data.data)
         else:
             return await ctx.send("There aren't any results in this category!")
         if not response_csv_filename.ok:
@@ -78,9 +78,7 @@ class General(commands.Cog):
             print("Che è successo? Non è arrivato bene il file csv. LOL!")
         else:
             response_data = response_csv_filename.json()
-            csv_file_path = os.path.abspath(
-                r'C:\Users\claud\Desktop\Distributed Systems and Big Data\DSBD_Project\\'
-                + response_data['filename'].replace('"', ''))
+            csv_file_path = '/tmpfiles/' + response_data['filename'].replace('"', '')
             with open(csv_file_path, "rb") as file:  # opening in read-binary mode
                 # instance of discord File class that wants the filepointer and his new name (optional)
                 discord_file = discord.File(file, f"goldbet_search_{ctx.author.name}_{category}_goldbet.csv")
@@ -88,7 +86,7 @@ class General(commands.Cog):
             # taking the url of the uploaded file on discord, saved into the CDN (Content Delivery Network)
             url_csv = message.attachments[0].url
             patching_associated_search_data = {'url_csv': url_csv, 'search_id': response_data['search_id']}
-            patching_url_csv = requests.post('http://localhost:8000/bot/csv/', data=patching_associated_search_data)
+            patching_url_csv = requests.post('http://server:8000/bot/csv/', data=patching_associated_search_data)
             if not patching_url_csv.ok:
                 await message.delete()
 
@@ -102,16 +100,14 @@ class General(commands.Cog):
         bet_data = await _call_retry(bwin.run, 2, category)
         search_data = _get_search_data(ctx, bet_data, 'bwin')
         if search_data is not None:
-            response_csv_filename = requests.post('http://localhost:8000/bot/bwin/', json=search_data.data)
+            response_csv_filename = requests.post('http://server:8000/bot/bwin/', json=search_data.data)
         else:
             return await ctx.send("There aren't any results in this category!")
         if not response_csv_filename.ok:
             await ctx.send("Error during the parsing of the file")
         else:
             response_data = response_csv_filename.json()
-            csv_file_path = os.path.abspath(
-                r'C:\Users\claud\Desktop\Distributed Systems and Big Data\DSBD_Project\\'
-                + response_data['filename'].replace('"', ''))
+            csv_file_path = '/tmpfiles/' + response_data['filename'].replace('"', '')
             with open(csv_file_path, "rb") as file:  # opening in read-binary mode
                 # instance of discord File class that wants the filepointer and his new name (optional)
                 discord_file = discord.File(file, f"bwin_search_{ctx.author.name}_{category}_bwin.csv")
@@ -119,7 +115,7 @@ class General(commands.Cog):
             # taking the url of the uploaded file on discord, saved into the CDN (Content Delivery Network)
             url_csv = message.attachments[0].url
             patching_associated_search_data = {'url_csv': url_csv, 'search_id': response_data['search_id']}
-            patching_url_csv = requests.post('http://localhost:8000/bot/csv/', data=patching_associated_search_data)
+            patching_url_csv = requests.post('http://server:8000/bot/csv/', data=patching_associated_search_data)
             if not patching_url_csv.ok:
                 await message.delete()
 
@@ -129,7 +125,7 @@ class General(commands.Cog):
 
     @commands.command()
     async def stat(self, ctx, stat: int):
-        result = requests.get(f"http://localhost:8000/bot/stats?stat={stat}")
+        result = requests.get(f"http://server:8000/bot/stats?stat={stat}")
         match stat:
             case 1:
                 response = result.json()
@@ -156,10 +152,10 @@ class General(commands.Cog):
             case 'ban':
                 try:
                     if args[1] == 'perma':
-                        result = requests.post("http://localhost:8000/bot/settings", params={'setting': 'ban'},
+                        result = requests.post("http://server:8000/bot/settings", params={'setting': 'ban'},
                                                data={'user': args[0], 'period': 'perma'})
                     else:
-                        result = requests.post("http://localhost:8000/bot/settings", params={'setting': 'ban'},
+                        result = requests.post("http://server:8000/bot/settings", params={'setting': 'ban'},
                                            data={'user': args[0], 'period': args[1]})
                     if not result.ok:
                         return await ctx.send('Error during the suspension of the user')
@@ -168,7 +164,7 @@ class General(commands.Cog):
                     return await ctx.send('Missing arguments: user and period are needed')
             case 'unban':
                 try:
-                    result = requests.post("http://localhost:8000/bot/settings", params={'setting': 'ban'},
+                    result = requests.post("http://server:8000/bot/settings", params={'setting': 'ban'},
                                            data={'user': args[0], 'period': 'null'})
                     if not result.ok:
                         return await ctx.send('Error during the unban of the user')
@@ -177,7 +173,7 @@ class General(commands.Cog):
                     return await ctx.send('Missing arguments: user and period are needed')
             case 'max_searches':
                 try:
-                    result = requests.post("http://localhost:8000/bot/settings", params={'setting': 'max_r'},
+                    result = requests.post("http://server:8000/bot/settings", params={'setting': 'max_r'},
                                            data={'user': args[0], 'limit': args[1]})
                     if not result.ok:
                         return await ctx.send('Error during the limit setting of researches for the user')
@@ -188,7 +184,7 @@ class General(commands.Cog):
                 try:
                     if args[1] != 'enable' and args[1] != 'disable':
                         return await ctx.send('The state must be enable/disable')
-                    result = requests.post('http://localhost:8000/bot/settings', params={'setting': 'toggle'},
+                    result = requests.post('http://server:8000/bot/settings', params={'setting': 'toggle'},
                                            data={'web_site': args[0], 'state': args[1]})
                     if not result.ok:
                         return await ctx.send('Error during the toggle of the websites')

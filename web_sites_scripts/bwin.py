@@ -21,12 +21,15 @@ def run(category):
         'serie_B': '/scommesse/italia-20/serie-b-102848'
     }
 
-    serv = Service('chromedriver.exe')
     chrome_opts = webdriver.ChromeOptions()
     chrome_opts.add_argument('window-size=1920,1080')
     chrome_opts.add_argument('headless')
+    chrome_opts.add_argument('disable-gpu')
+    chrome_opts.add_argument('disable-software-rasterizer')
+    chrome_opts.add_argument('disable-dev-shm-usage')
+    chrome_opts.add_argument('no-sandbox')
 
-    with webdriver.Chrome(service=serv, options=chrome_opts) as driver:
+    with webdriver.Chrome(options=chrome_opts) as driver:
         driver.implicitly_wait(3)
         driver.get(url + url_list.get(category, url_list['serie_A']))
         web_element = WebDriverWait(driver, 5).until(ec.presence_of_element_located((By.CSS_SELECTOR, '.grid')))
