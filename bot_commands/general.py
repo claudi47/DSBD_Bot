@@ -2,7 +2,6 @@ from json import JSONDecodeError
 
 import discord
 import requests
-import os
 from discord.ext import commands
 from discord.ext.commands import Context
 from web_sites_scripts import goldbet, bwin
