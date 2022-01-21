@@ -1,5 +1,5 @@
 import requests
-from models.betting_data import BettingData
+from app.bet_models.betting_data import BettingData
 
 
 def run(category):

@@ -1,14 +1,20 @@
+import asyncio
+import logging
+import uuid
 from json import JSONDecodeError
 
 import discord
 import requests
+from confluent_kafka import KafkaException
 from discord.ext import commands
 from discord.ext.commands import Context
-from web_sites_scripts import goldbet, bwin
 
-from models.search_data import SearchData
-from models.user_data import UserData
-from models.betting_data import BettingData
+from app.bet_models.search_data import SearchData
+from app.bet_models.user_data import UserData
+from ..bet_models.betting_data import BettingData
+import app.kafka.producers as producers
+from ..models import UserAuthTransfer, SearchDataPartialInDb
+from ..web_sites_scripts import goldbet, bwin
 
 
 # static functions are collocated outside the classes
@@ -22,31 +28,44 @@ def _get_search_data(ctx: Context, bet_data: BettingData, website):
     return search_data
 
 
-async def _validation(ctx: Context, website):
-    can_execute = requests.get(f'http://server:8000/bot/validation/?user_id={ctx.author.id}&website={website}')
-    if not can_execute.ok:
-        return False, "Validation error!"
-    validation_data = can_execute.text
-    if 'banned' in validation_data:
-        return False, "You got banned"
-    elif 'reached_max' in validation_data:
-        return False, "You cannot do another research"
-    elif 'disabled' in validation_data:
-        return False, "This website is temporarily disabled by the Admin"
+def _validation(ctx: Context, website, category, tx_id) -> asyncio.Future:
+    # can_execute = requests.get(f'http://server:8000/bot/validation/?user_id={ctx.author.id}&website={website}')
 
-    return True, ""
+    return producers.user_auth_producer.produce(tx_id, UserAuthTransfer(user_id=ctx.author.id,
+                                                                                    username=ctx.author.name),
+                                                headers={'channel_id': str(ctx.channel.id), 'web_site': website,
+                                                         'category': category})
+
+    # if not can_execute.ok:
+    #     return False, "Validation error!"
+    # validation_data = can_execute.text
+    # if 'banned' in validation_data:
+    #     return False, "You got banned"
+    # elif 'reached_max' in validation_data:
+    #     return False, "You cannot do another research"
+    # elif 'disabled' in validation_data:
+    #     return False, "This website is temporarily disabled by the Admin"
+    #
+    # return True, ""
 
 
-async def _call_retry(function, retry_counter, *args):
+def _call_retry(function, retry_counter, *args):
     while retry_counter > 0:
         try:
             return function(*args)
         except Exception as ex:
             retry_counter -= 1
+    return None
+
+def _search_entry_send(ctx, web_site, category, tx_id) -> asyncio.Future:
+    return producers.partial_search_entry_producer.produce(tx_id, SearchDataPartialInDb(web_site=web_site,
+                                                                                                    user_id=ctx.author.id),
+                                                           headers={'channel_id': str(ctx.channel.id), 'web_site': web_site,
+                                                                    'category': category})
 
 
 class General(commands.Cog):
-    def __init__(self, bot):
+    def __init__(self, bot: commands.Bot):
         self.bot = bot
 
     # Annotation to specify the decorator (Decorator Pattern)
@@ -58,6 +77,18 @@ class General(commands.Cog):
                                   ' GoldBet website. The quotes are 1x2 and Under/Over')
     # This is the function passed by param to the decorator -> decorator(func)
     async def goldbet(self, ctx: Context, category):
+        tx_id = str(uuid.uuid4())
+        user_validation = _validation(ctx, 'goldbet', category, tx_id)
+        search_entry_send = _search_entry_send(ctx, 'goldbet', category, tx_id)
+
+        return
+
+        try:
+            user_validation_ack = await user_validation
+            logging.info(f'User validation phase: message sent -- {user_validation_ack}')
+        except KafkaException as exc:
+            logging.error(f'User validation phase got an error: {exc}')
+            user_validation.cancel()
         is_valid, description = await _validation(ctx, 'goldbet')
         if not is_valid:
             return await ctx.send(description)
@@ -96,7 +127,7 @@ class General(commands.Cog):
         is_valid, description = await _validation(ctx, 'bwin')
         if not is_valid:
             return await ctx.send(description)
-        bet_data = await _call_retry(bwin.run, 2, category)
+        bet_data = _call_retry(bwin.run, 2, category)
         search_data = _get_search_data(ctx, bet_data, 'bwin')
         if search_data is not None:
             response_csv_filename = requests.post('http://server:8000/bot/bwin/', json=search_data.data)
