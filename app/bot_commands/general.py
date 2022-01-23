@@ -124,6 +124,10 @@ class General(commands.Cog):
                       description='This command shows the most important quotes about all the soccer matches inside bwin'
                                   ' website. The quotes are 1x2 and Over/Under')
     async def bwin(self, ctx: Context, category):
+        tx_id = str(uuid.uuid4())
+        user_validation = _validation(ctx, 'bwin', category, tx_id)
+        search_entry_send = _search_entry_send(ctx, 'bwin', category, tx_id)
+        return
         is_valid, description = await _validation(ctx, 'bwin')
         if not is_valid:
             return await ctx.send(description)

@@ -1,9 +1,11 @@
-from json import JSONDecodeError
-
 import asyncio
+import io
 import logging
 import threading
 from abc import ABC, abstractmethod
+from json import JSONDecodeError
+
+import discord
 from confluent_kafka import DeserializingConsumer, Consumer
 from confluent_kafka.schema_registry.json_schema import JSONDeserializer
 from confluent_kafka.serialization import StringDeserializer
@@ -310,7 +312,17 @@ class CsvGenReplyConsumer(GenericConsumer):
                 if csv_str is not None:
                     print('CSV gen reply!')
                     print(f'headers: {msg.headers()}')
-                    # TODO: send CSV to discord
+                    with io.BytesIO(msg.value()) as csv_bytes:
+                        res: discord.Message = asyncio.run_coroutine_threadsafe(
+                            self.client.get_channel(int(msg.headers()[0][1])).send('Here is the CSV file',
+                                                                                   file=discord.File(csv_bytes,
+                                                                                                     filename='csv.txt')),
+                            self._loop).result(20)
+
+                    async def final_transaction_step():
+                        await producers.bet_data_finish_producer.produce(msg.key(), res.attachments[0].url, headers=msg.headers())
+
+                    asyncio.run_coroutine_threadsafe(final_transaction_step(), self._loop).result(20)
                     self._consumer.commit(msg)
                 else:
                     logging.warning(f'Null value for the message: {msg.key()}')
@@ -319,6 +331,7 @@ class CsvGenReplyConsumer(GenericConsumer):
                 logging.error(exc)
                 try:
                     self._consumer.commit(msg)
+                    asyncio.run_coroutine_threadsafe(self.client.get_channel(msg.headers()[0][1]).send('Transaction error! Final step'), self._loop)
                 except:
                     pass
 
