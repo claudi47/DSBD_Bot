@@ -15,10 +15,11 @@ import app.kafka.producers as producers
 from app.bot_commands.general import _call_retry
 from app.models import UserAuthTransfer, UserAuthTransferReply, BetDataUpdateList
 from app.web_sites_scripts import goldbet, bwin
+import app.settings as config
 
 
 class GenericConsumer(ABC):
-    bootstrap_servers = 'broker:29092'
+    bootstrap_servers = config.broker_settings.broker
 
     @property
     @abstractmethod
@@ -111,7 +112,7 @@ class UserAuthConsumer(GenericConsumer):
 
     @property
     def topic(self):
-        return 'user_auth_reply'
+        return 'user-auth-reply'
 
     @property
     def schema(self):
@@ -167,6 +168,11 @@ class UserAuthConsumer(GenericConsumer):
                 if user_auth is not None:
                     if user_auth.authorized:
                         bet_data = self.parse_website(msg)
+                        if bet_data is None:
+                            asyncio.run_coroutine_threadsafe(
+                                self.client.get_channel(int(msg.headers()[0][1])).send('Website temporarily disabled'),
+                                loop=self._loop)
+                            raise Exception('Parsing error')
 
                         async def get_csvgen_ack(csv_gen_ack_fut: asyncio.Future):
                             try:
@@ -185,7 +191,8 @@ class UserAuthConsumer(GenericConsumer):
                         asyncio.run_coroutine_threadsafe(get_csvgen_ack(producers_acks), loop=self._loop)
                     else:
                         asyncio.run_coroutine_threadsafe(
-                            self.client.get_channel(int(msg.headers()[0][1])).send('Transaction error! User not authorized!'),
+                            self.client.get_channel(int(msg.headers()[0][1])).send(
+                                'Transaction error! User not authorized!'),
                             loop=self._loop)
 
                     self._consumer.commit(msg)
@@ -292,7 +299,7 @@ class CsvGenReplyConsumer(GenericConsumer):
 
     @property
     def topic(self):
-        return 'csv_gen_reply'
+        return 'csv-gen-reply'
 
     @property
     def schema(self):
@@ -320,7 +327,8 @@ class CsvGenReplyConsumer(GenericConsumer):
                             self._loop).result(20)
 
                     async def final_transaction_step():
-                        await producers.bet_data_finish_producer.produce(msg.key(), res.attachments[0].url, headers=msg.headers())
+                        await producers.bet_data_finish_producer.produce(msg.key(), res.attachments[0].url,
+                                                                         headers=msg.headers())
 
                     asyncio.run_coroutine_threadsafe(final_transaction_step(), self._loop).result(20)
                     self._consumer.commit(msg)
@@ -331,7 +339,8 @@ class CsvGenReplyConsumer(GenericConsumer):
                 logging.error(exc)
                 try:
                     self._consumer.commit(msg)
-                    asyncio.run_coroutine_threadsafe(self.client.get_channel(msg.headers()[0][1]).send('Transaction error! Final step'), self._loop)
+                    asyncio.run_coroutine_threadsafe(
+                        self.client.get_channel(msg.headers()[0][1]).send('Transaction error! Final step'), self._loop)
                 except:
                     pass
 

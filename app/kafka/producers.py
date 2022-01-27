@@ -8,11 +8,12 @@ from confluent_kafka.schema_registry.json_schema import JSONSerializer
 from confluent_kafka.serialization import StringSerializer
 
 from app.models import SearchDataPartialInDb, UserAuthTransfer, BetDataUpdateList
+import app.settings as config
 
 
 class GenericProducer(ABC):
-    bootstrap_servers = 'broker:29092'
-    schema_registry_conf = {'url': 'http://schema-registry:8081'}
+    bootstrap_servers = config.broker_settings.broker
+    schema_registry_conf = {'url': config.broker_settings.schema_registry}
 
     # bootstrap_servers = 'localhost:9092'
     # schema_registry_conf = {'url': 'http://localhost:8081'}
@@ -68,7 +69,7 @@ class GenericProducer(ABC):
 
 
 class PartialSearchEntryProducer(GenericProducer):
-    topic = 'search_entry'
+    topic = 'search-entry'
 
     def model_to_dict(self, obj: SearchDataPartialInDb, ctx):
         if obj is None:
@@ -117,7 +118,7 @@ class PartialSearchEntryProducer(GenericProducer):
 
 
 class UserAuthProducer(GenericProducer):
-    topic = 'user_auth'
+    topic = 'user-auth'
 
     def model_to_dict(self, obj: UserAuthTransfer, ctx):
         if obj is None:
@@ -166,7 +167,7 @@ class UserAuthProducer(GenericProducer):
 
 
 class CsvGenProducer(GenericProducer):
-    topic = 'csv_gen'
+    topic = 'csv-gen'
 
     def model_to_dict(self, obj: BetDataUpdateList, ctx):
         if obj is None:
@@ -236,11 +237,11 @@ class CsvGenProducer(GenericProducer):
 
 
 class BetDataProducer(CsvGenProducer):
-    topic = 'bet_data_apply'
+    topic = 'bet-data-apply'
 
 
 class BetDataFinishProducer(GenericProducer):
-    topic = 'bet_data_finish'
+    topic = 'bet-data-finish'
 
     def model_to_dict(self, obj, ctx):
         return None
