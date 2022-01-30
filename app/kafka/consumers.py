@@ -383,7 +383,7 @@ class CsvMessageConsumer(GenericConsumer):
 
     @property
     def topic(self):
-        return 'csv_attachment'
+        return 'csv-attachment'
 
     @property
     def schema(self):
