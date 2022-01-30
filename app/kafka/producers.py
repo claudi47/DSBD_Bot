@@ -9,6 +9,7 @@ from confluent_kafka.serialization import StringSerializer
 
 from app.models import SearchDataPartialInDb, UserAuthTransfer, BetDataUpdateList
 import app.settings as config
+from app.utils.advanced_scheduler import async_repeat_deco
 
 
 class GenericProducer(ABC):
@@ -275,19 +276,41 @@ bet_data_finish_producer: BetDataFinishProducer
 
 
 def init_producers(client=None):
-    global partial_search_entry_producer, user_auth_producer, csv_gen_producer, bet_data_apply_producer, bet_data_finish_producer
+    @async_repeat_deco(3, 3, always_reschedule=True)
+    async def init_partial_search_entry_producer(_):
+        global partial_search_entry_producer
+        partial_search_entry_producer = PartialSearchEntryProducer(asyncio.get_running_loop(), client)
+        partial_search_entry_producer.produce_data()
 
-    partial_search_entry_producer = PartialSearchEntryProducer(asyncio.get_running_loop(), client)
-    user_auth_producer = UserAuthProducer(asyncio.get_running_loop(), client)
-    csv_gen_producer = CsvGenProducer(asyncio.get_running_loop(), client)
-    bet_data_apply_producer = BetDataProducer(asyncio.get_running_loop(), client)
-    bet_data_finish_producer = BetDataFinishProducer(asyncio.get_running_loop(), client, normal=True)
+    @async_repeat_deco(3, 3, always_reschedule=True)
+    async def init_user_auth_producer(_):
+        global user_auth_producer
+        user_auth_producer = UserAuthProducer(asyncio.get_running_loop(), client)
+        user_auth_producer.produce_data()
 
-    partial_search_entry_producer.produce_data()
-    user_auth_producer.produce_data()
-    csv_gen_producer.produce_data()
-    bet_data_apply_producer.produce_data()
-    bet_data_finish_producer.produce_data()
+    @async_repeat_deco(3, 3, always_reschedule=True)
+    async def init_csv_gen_producer(_):
+        global csv_gen_producer
+        csv_gen_producer = CsvGenProducer(asyncio.get_running_loop(), client)
+        csv_gen_producer.produce_data()
+
+    @async_repeat_deco(3, 3, always_reschedule=True)
+    async def init_betdata_apply_producer(_):
+        global bet_data_apply_producer
+        bet_data_apply_producer = BetDataProducer(asyncio.get_running_loop(), client)
+        bet_data_apply_producer.produce_data()
+
+    @async_repeat_deco(3, 3, always_reschedule=True)
+    async def init_betdata_finish_producer(_):
+        global bet_data_finish_producer
+        bet_data_finish_producer = BetDataFinishProducer(asyncio.get_running_loop(), client, normal=True)
+        bet_data_finish_producer.produce_data()
+
+    asyncio.run_coroutine_threadsafe(init_partial_search_entry_producer('partial_search_entry_producer'), loop=asyncio.get_running_loop())
+    asyncio.run_coroutine_threadsafe(init_user_auth_producer('user_auth_producer'), loop=asyncio.get_running_loop())
+    asyncio.run_coroutine_threadsafe(init_csv_gen_producer('csg_gen_producer'), loop=asyncio.get_running_loop())
+    asyncio.run_coroutine_threadsafe(init_betdata_apply_producer('betdata_apply_producer'), loop=asyncio.get_running_loop())
+    asyncio.run_coroutine_threadsafe(init_betdata_finish_producer('betdata_finish_producer'), loop=asyncio.get_running_loop())
 
 
 def close_producers():

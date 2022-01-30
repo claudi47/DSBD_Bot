@@ -1,21 +1,26 @@
 import asyncio
+import datetime
 import io
 import logging
 import threading
 from abc import ABC, abstractmethod
 from json import JSONDecodeError
 
+import confluent_kafka
 import discord
+import requests
 from confluent_kafka import DeserializingConsumer, Consumer
 from confluent_kafka.schema_registry.json_schema import JSONDeserializer
 from confluent_kafka.serialization import StringDeserializer
 from discord.ext import commands
 
 import app.kafka.producers as producers
-from app.bot_commands.general import _call_retry
-from app.models import UserAuthTransfer, UserAuthTransferReply, BetDataUpdateList
-from app.web_sites_scripts import goldbet, bwin
 import app.settings as config
+from app.bot_commands.general import _call_retry
+from app.models import UserAuthTransfer, UserAuthTransferReply, BetDataUpdateList, SearchDataPartialInDb
+from app.utils import advanced_scheduler
+from app.utils.advanced_scheduler import async_repeat_deco
+from app.web_sites_scripts import goldbet, bwin
 
 
 class GenericConsumer(ABC):
@@ -100,7 +105,7 @@ class UserAuthConsumer(GenericConsumer):
 
     @property
     def group_id(self):
-        return 'my_group'
+        return 'my_group_bot'
 
     @property
     def auto_offset_reset(self):
@@ -180,6 +185,18 @@ class UserAuthConsumer(GenericConsumer):
                             except:
                                 self.client.get_channel(int(msg.headers()[0][1])).send('Transaction error (ack)')
 
+                        timestamp_tuple = msg.timestamp()
+
+                        if timestamp_tuple[0] != confluent_kafka.TIMESTAMP_NOT_AVAILABLE:
+                            if datetime.datetime.now(tz=datetime.timezone.utc) - datetime.datetime.fromtimestamp(
+                                    timestamp_tuple[1] / 1000.0, tz=datetime.timezone.utc) > datetime.timedelta(seconds=20):
+                                producers.partial_search_entry_producer.produce(msg.key(),
+                                                                                SearchDataPartialInDb(
+                                                                                    web_site=msg.headers()[1][1].decode(
+                                                                                        'utf-8'),
+                                                                                    user_id=int(msg.headers()[4][1])),
+                                                                                headers=msg.headers())
+
                         producers_acks = asyncio.gather(producers.csv_gen_producer.produce(msg.key(),
                                                                                            BetDataUpdateList.parse_obj(
                                                                                                bet_data.data),
@@ -215,7 +232,7 @@ class UserAuthConsumerNormal(GenericConsumer):
 
     @property
     def group_id(self):
-        return 'my_group'
+        return 'my_group_bot'
 
     @property
     def auto_offset_reset(self):
@@ -287,7 +304,7 @@ class CsvGenReplyConsumer(GenericConsumer):
 
     @property
     def group_id(self):
-        return 'my_group'
+        return 'my_group_bot'
 
     @property
     def auto_offset_reset(self):
@@ -321,7 +338,7 @@ class CsvGenReplyConsumer(GenericConsumer):
                     print(f'headers: {msg.headers()}')
                     with io.BytesIO(msg.value()) as csv_bytes:
                         res: discord.Message = asyncio.run_coroutine_threadsafe(
-                            self.client.get_channel(int(msg.headers()[0][1])).send('Here is the CSV file',
+                            self.client.get_channel(int(msg.headers()[3][1])).send('Here is the CSV file',
                                                                                    file=discord.File(csv_bytes,
                                                                                                      filename='csv.txt')),
                             self._loop).result(20)
@@ -340,7 +357,74 @@ class CsvGenReplyConsumer(GenericConsumer):
                 try:
                     self._consumer.commit(msg)
                     asyncio.run_coroutine_threadsafe(
-                        self.client.get_channel(msg.headers()[0][1]).send('Transaction error! Final step'), self._loop)
+                        self.client.get_channel(int(msg.headers()[0][1])).send('Transaction error! Final step'),
+                        self._loop)
+                except:
+                    pass
+
+                # break
+
+        self._consumer.close()
+
+
+class CsvMessageConsumer(GenericConsumer):
+
+    @property
+    def group_id(self):
+        return 'my_group_bot'
+
+    @property
+    def auto_offset_reset(self):
+        return 'earliest'
+
+    @property
+    def auto_commit(self):
+        return False
+
+    @property
+    def topic(self):
+        return 'csv_attachment'
+
+    @property
+    def schema(self):
+        return None
+
+    def dict_to_model(self, map, ctx):
+        return None
+
+    def _consume_data(self):
+        while not self._cancelled:
+            try:
+                msg = self._consumer.poll(0.1)
+                if msg is None:
+                    continue
+
+                csv_attachment_url = msg.value()
+                if csv_attachment_url is not None:
+
+                    async def send_csv_file():
+                        csv_file_resp = requests.get(csv_attachment_url.decode('utf-8'))
+                        with io.BytesIO(csv_file_resp.content) as str_io:
+                            await self.client.get_channel(int(msg.headers()[0][1])).send(
+                                f'Here is the csv file <@{msg.headers()[4][1].decode("utf-8")}>',
+                                file=discord.File(str_io, filename='betdata.csv'))
+
+                    asyncio.run_coroutine_threadsafe(send_csv_file(), loop=self._loop).result(20)
+                    try:
+                        advanced_scheduler.transaction_scheduler.remove_job(msg.key().decode('utf-8'))
+                    except:
+                        pass
+                    self._consumer.commit(msg)
+                else:
+                    logging.warning(f'Null value for the message: {msg.key()}')
+                    self._consumer.commit(msg)
+            except Exception as exc:
+                logging.error(exc)
+                try:
+                    self._consumer.commit(msg)
+                    asyncio.run_coroutine_threadsafe(
+                        self.client.get_channel(int(msg.headers()[0][1])).send(
+                            'Transaction error! Final step (CSV FILE)'), self._loop)
                 except:
                     pass
 
@@ -351,17 +435,35 @@ class CsvGenReplyConsumer(GenericConsumer):
 
 user_auth_consumer: UserAuthConsumer
 csv_gen_reply_consumer: CsvGenReplyConsumer
+csv_message_consumer: CsvMessageConsumer
 
 
 def init_consumers(client=None):
-    global user_auth_consumer, csv_gen_reply_consumer
+    @async_repeat_deco(3, 3, always_reschedule=True)
+    async def init_user_auth_consumer(_):
+        global user_auth_consumer
+        user_auth_consumer = UserAuthConsumer(asyncio.get_running_loop(), client)
+        user_auth_consumer.consume_data()
 
-    user_auth_consumer = UserAuthConsumer(asyncio.get_running_loop(), client)
-    csv_gen_reply_consumer = CsvGenReplyConsumer(asyncio.get_running_loop(), client, normal_consumer=True)
-    user_auth_consumer.consume_data()
-    csv_gen_reply_consumer.consume_data()
+    @async_repeat_deco(3, 3, always_reschedule=True)
+    async def init_csv_gen_reply_consumer(_):
+        global csv_gen_reply_consumer
+        csv_gen_reply_consumer = CsvGenReplyConsumer(asyncio.get_running_loop(), client, normal_consumer=True)
+        csv_gen_reply_consumer.consume_data()
+
+    @async_repeat_deco(3, 3, always_reschedule=True)
+    async def init_csv_message_consumer(_):
+        global csv_message_consumer
+        csv_message_consumer = CsvMessageConsumer(asyncio.get_running_loop(), client, normal_consumer=True)
+        csv_message_consumer.consume_data()
+
+    asyncio.run_coroutine_threadsafe(init_user_auth_consumer('user_auth_consumer'), loop=asyncio.get_running_loop())
+    asyncio.run_coroutine_threadsafe(init_csv_gen_reply_consumer('csv_gen_reply_consumer'),
+                                     loop=asyncio.get_running_loop())
+    asyncio.run_coroutine_threadsafe(init_csv_message_consumer('csv_message_consumer'), loop=asyncio.get_running_loop())
 
 
 def close_consumers():
     user_auth_consumer.close()
     csv_gen_reply_consumer.close()
+    csv_message_consumer.close()
