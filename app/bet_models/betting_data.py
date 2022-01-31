@@ -3,7 +3,7 @@ import json
 
 class BettingData:
     def __init__(self):
-        self._data = [] # _data in this way means private <field> data
+        self._data = {'data': []}  # _data in this way means private <field> data
 
     # the decorator "property" is used when the function below is a getter/setter of a class
     @property
@@ -11,7 +11,7 @@ class BettingData:
         return self._data
 
     def add_row(self, date, match, one, ics, two, gol, over, under):
-        self._data.append({
+        self._data['data'].append({
             "date": date,
             "match": match,
             "one": one,

@@ -1,3 +1,7 @@
 discord.py
 requests
 selenium
+pydantic[dotenv]
+confluent-kafka[json,schema-registry,doc]
+apscheduler
+motor

@@ -1,5 +1,5 @@
-from models.betting_data import BettingData
-from models.user_data import UserData
+from app.bet_models.betting_data import BettingData
+from app.bet_models.user_data import UserData
 
 class SearchData:
     def __init__(self, bet_data:BettingData, user_data:UserData, website):
