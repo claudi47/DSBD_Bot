@@ -267,12 +267,61 @@ class BetDataFinishProducer(GenericProducer):
         self._producer.produce(topic=self.topic, key=id, value=value, on_delivery=delivery_report, headers=headers)
         return result_fut
 
+class UserLimitPreliminary(GenericProducer):
+    topic = 'user-limit-auth'
+
+    def model_to_dict(self, obj: UserAuthTransfer, ctx):
+        if obj is None:
+            return None
+
+        return obj.dict()
+
+    @property
+    def schema(self):
+        return """{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "User Auth Request",
+  "description": "User Auth request data",
+  "type": "object",
+  "properties": {
+    "user_id": {
+      "description": "User's Discord id",
+      "type": "string"
+    },
+    "username": {
+      "description": "User's nick",
+      "type": "string"
+    }
+  },
+  "required": [
+    "user_id",
+    "username"
+  ]
+}"""
+
+    def produce(self, id, value, headers) -> asyncio.Future:
+        result_fut = self._loop.create_future()
+
+        def delivery_report(err, msg):
+            """ Called once for each message produced to indicate delivery result.
+                Triggered by poll() or flush(). """
+            if err is not None:
+                print('Message delivery failed: {}'.format(err))
+                self._loop.call_soon_threadsafe(result_fut.set_exception, KafkaException(err))
+            else:
+                print('Message delivered to {} [{}]'.format(msg.topic(), msg.partition()))
+                self._loop.call_soon_threadsafe(result_fut.set_result, msg)
+
+        self._producer.produce(topic=self.topic, key=id, value=value, on_delivery=delivery_report, headers=headers)
+        return result_fut
+
 
 partial_search_entry_producer: PartialSearchEntryProducer
 user_auth_producer: UserAuthProducer
 csv_gen_producer: CsvGenProducer
 bet_data_apply_producer: BetDataProducer
 bet_data_finish_producer: BetDataFinishProducer
+user_limit_auth_producer: UserLimitPreliminary
 
 
 def init_producers(client=None):
@@ -306,11 +355,18 @@ def init_producers(client=None):
         bet_data_finish_producer = BetDataFinishProducer(asyncio.get_running_loop(), client, normal=True)
         bet_data_finish_producer.produce_data()
 
+    @async_repeat_deco(3, 3, always_reschedule=True)
+    async def init_user_limit_auth_producer(_):
+        global user_limit_auth_producer
+        user_limit_auth_producer = UserLimitPreliminary(asyncio.get_running_loop(), client)
+        user_limit_auth_producer.produce_data()
+
     asyncio.run_coroutine_threadsafe(init_partial_search_entry_producer('partial_search_entry_producer'), loop=asyncio.get_running_loop())
     asyncio.run_coroutine_threadsafe(init_user_auth_producer('user_auth_producer'), loop=asyncio.get_running_loop())
     asyncio.run_coroutine_threadsafe(init_csv_gen_producer('csg_gen_producer'), loop=asyncio.get_running_loop())
     asyncio.run_coroutine_threadsafe(init_betdata_apply_producer('betdata_apply_producer'), loop=asyncio.get_running_loop())
     asyncio.run_coroutine_threadsafe(init_betdata_finish_producer('betdata_finish_producer'), loop=asyncio.get_running_loop())
+    asyncio.run_coroutine_threadsafe(init_user_limit_auth_producer('user_limit_auth_producer'), loop=asyncio.get_running_loop())
 
 
 def close_producers():
@@ -318,3 +374,4 @@ def close_producers():
     user_auth_producer.close()
     csv_gen_producer.close()
     bet_data_finish_producer.close()
+    user_limit_auth_producer.close()
