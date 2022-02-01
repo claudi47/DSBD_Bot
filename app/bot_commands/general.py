@@ -1,14 +1,15 @@
-import asyncio
-import datetime
-import logging
-import os
-import urllib.parse
-import uuid
+import json
 from json import JSONDecodeError
 
+import asyncio
+import datetime
 import discord
+import logging
+import os
 import pytz
 import requests
+import urllib.parse
+import uuid
 from confluent_kafka import KafkaException
 from discord.ext import commands
 from discord.ext.commands import Context
@@ -35,13 +36,19 @@ def _get_search_data(ctx: Context, bet_data: BettingData, website):
 
 def _validation(ctx: Context, website, category, tx_id) -> asyncio.Future:
     # can_execute = requests.get(f'http://server:8000/bot/validation/?user_id={ctx.author.id}&website={website}')
-
-    return producers.user_auth_producer.produce(tx_id, UserAuthTransfer(user_id=ctx.author.id,
-                                                                        username=ctx.author.name),
-                                                headers={'channel_id': str(ctx.channel.id), 'web_site': website,
-                                                         'category': category,
-                                                         'junk_channel': '936928750967353414',
-                                                         'author_id': str(ctx.author.id)})
+    return asyncio.gather(producers.user_auth_producer.produce(tx_id, UserAuthTransfer(user_id=ctx.author.id,
+                                                                                username=ctx.author.name),
+                                                        headers={'channel_id': str(ctx.channel.id), 'web_site': website,
+                                                                 'category': category,
+                                                                 'junk_channel': '936928750967353414',
+                                                                 'author_id': str(ctx.author.id)}),
+                   producers.user_limit_auth_producer.produce(tx_id, UserAuthTransfer(user_id=ctx.author.id,
+                                                                                      username=ctx.author.name),
+                                                              headers={'channel_id': str(ctx.channel.id),
+                                                                       'web_site': website,
+                                                                       'category': category,
+                                                                       'junk_channel': '936928750967353414',
+                                                                       'author_id': str(ctx.author.id)}))
 
     # if not can_execute.ok:
     #     return False, "Validation error!"
@@ -91,6 +98,18 @@ class General(commands.Cog):
                                   ' GoldBet website. The quotes are 1x2 and Under/Over')
     # This is the function passed by param to the decorator -> decorator(func)
     async def goldbet(self, ctx: Context, category):
+        if not os.path.exists('/usr/src/app/config/settings.in'):
+            default_settings = {'goldbet': True, 'bwin': True}
+            with open('/usr/src/app/config/settings.in', 'w') as settings_file:
+                json.dump(default_settings, settings_file)
+
+        with open('/usr/src/app/config/settings.in', 'r') as settings_file:
+            settings = json.load(settings_file)
+
+        if settings['goldbet'] is False:
+            await ctx.send('This website has been disabled by the admin!')
+            return
+
         await ctx.send('Your operation is being processed, please wait!')
 
         tx_id = str(uuid.uuid4())
@@ -101,52 +120,25 @@ class General(commands.Cog):
                                                          id=tx_id,
                                                          replace_existing=True,
                                                          misfire_grace_time=None)
-        user_validation = _validation(ctx, 'goldbet', category, tx_id)
-        search_entry_send = _search_entry_send(ctx, 'goldbet', category, tx_id)
-
-        return
-
-        try:
-            user_validation_ack = await user_validation
-            logging.info(f'User validation phase: message sent -- {user_validation_ack}')
-        except KafkaException as exc:
-            logging.error(f'User validation phase got an error: {exc}')
-            user_validation.cancel()
-        is_valid, description = await _validation(ctx, 'goldbet')
-        if not is_valid:
-            return await ctx.send(description)
-        try:
-            bet_data = goldbet.run(category)
-        except JSONDecodeError as j:
-            await ctx.send("Category temporarily disabled by the website, try another day")
-            return print(j)
-        search_data = _get_search_data(ctx, bet_data, 'goldbet')
-        if search_data is not None:
-            # sending json object to web server through POST method
-            response_csv_filename = requests.post('http://server:8000/bot/goldbet/', json=search_data.data)
-        else:
-            return await ctx.send("There aren't any results in this category!")
-        if not response_csv_filename.ok:
-            await ctx.send("Error during the parsing of the file")
-            print("Che è successo? Non è arrivato bene il file csv. LOL!")
-        else:
-            response_data = response_csv_filename.json()
-            csv_file_path = '/tmpfiles/' + response_data['filename'].replace('"', '')
-            with open(csv_file_path, "rb") as file:  # opening in read-binary mode
-                # instance of discord File class that wants the filepointer and his new name (optional)
-                discord_file = discord.File(file, f"goldbet_search_{ctx.author.name}_{category}_goldbet.csv")
-                message = await ctx.send(f"Here's your research, {ctx.author.name}. Bet safely...", file=discord_file)
-            # taking the url of the uploaded file on discord, saved into the CDN (Content Delivery Network)
-            url_csv = message.attachments[0].url
-            patching_associated_search_data = {'url_csv': url_csv, 'search_id': response_data['search_id']}
-            patching_url_csv = requests.post('http://server:8000/bot/csv/', data=patching_associated_search_data)
-            if not patching_url_csv.ok:
-                await message.delete()
+        _validation(ctx, 'goldbet', category, tx_id)
+        _search_entry_send(ctx, 'goldbet', category, tx_id)
 
     @commands.command(brief='Shows the quotes of the principal soccer matches inside Bwin website',
                       description='This command shows the most important quotes about all the soccer matches inside bwin'
                                   ' website. The quotes are 1x2 and Over/Under')
     async def bwin(self, ctx: Context, category):
+        if not os.path.exists('/usr/src/app/config/settings.in'):
+            default_settings = {'goldbet': True, 'bwin': True}
+            with open('/usr/src/app/config/settings.in', 'w') as settings_file:
+                json.dump(default_settings, settings_file)
+
+        with open('/usr/src/app/config/settings.in', 'r') as settings_file:
+            settings = json.load(settings_file)
+
+        if settings['bwin'] is False:
+            await ctx.send('This website has been disabled by the admin!')
+            return
+
         await ctx.send('Your operation is being processed, please wait!')
 
         tx_id = str(uuid.uuid4())
@@ -157,37 +149,9 @@ class General(commands.Cog):
                                                          id=tx_id,
                                                          replace_existing=True,
                                                          misfire_grace_time=None)
-        user_validation = _validation(ctx, 'bwin', category, tx_id)
-        search_entry_send = _search_entry_send(ctx, 'bwin', category, tx_id)
-        return
-        is_valid, description = await _validation(ctx, 'bwin')
-        if not is_valid:
-            return await ctx.send(description)
-        bet_data = _call_retry(bwin.run, 2, category)
-        search_data = _get_search_data(ctx, bet_data, 'bwin')
-        if search_data is not None:
-            response_csv_filename = requests.post('http://server:8000/bot/bwin/', json=search_data.data)
-        else:
-            return await ctx.send("There aren't any results in this category!")
-        if not response_csv_filename.ok:
-            await ctx.send("Error during the parsing of the file")
-        else:
-            response_data = response_csv_filename.json()
-            csv_file_path = '/tmpfiles/' + response_data['filename'].replace('"', '')
-            with open(csv_file_path, "rb") as file:  # opening in read-binary mode
-                # instance of discord File class that wants the filepointer and his new name (optional)
-                discord_file = discord.File(file, f"bwin_search_{ctx.author.name}_{category}_bwin.csv")
-                message = await ctx.send(f"Here's your research, {ctx.author.name}. Bet safely...", file=discord_file)
-            # taking the url of the uploaded file on discord, saved into the CDN (Content Delivery Network)
-            url_csv = message.attachments[0].url
-            patching_associated_search_data = {'url_csv': url_csv, 'search_id': response_data['search_id']}
-            patching_url_csv = requests.post('http://server:8000/bot/csv/', data=patching_associated_search_data)
-            if not patching_url_csv.ok:
-                await message.delete()
+        _validation(ctx, 'bwin', category, tx_id)
+        _search_entry_send(ctx, 'bwin', category, tx_id)
 
-        # await is a command similar to return but for async functions
-        # await is necessary when a context switch happens (for example when two command are invoked simultaneously)
-        # the funct stops and resumes his work after the other event finishes
 
     @commands.command()
     async def stat(self, ctx, stat: int):
@@ -222,7 +186,7 @@ class General(commands.Cog):
             case 'ban':
                 try:
                     result = requests.put(f"http://{os.getenv('USER_SERVICE_URL')}/users/{urllib.parse.quote_plus(args[0])}/ban",
-                                          params={'band_period': args[1]})
+                                          params={'ban_period': args[1]})
                     if not result.ok:
                         return await ctx.send('Error during the suspension of the user')
                     return
@@ -251,10 +215,18 @@ class General(commands.Cog):
                 try:
                     if args[1] != 'enable' and args[1] != 'disable':
                         return await ctx.send('The state must be enable/disable')
-                    result = requests.post('http://server:8000/bot/settings', params={'setting': 'toggle'},
-                                           data={'web_site': args[0], 'state': args[1]})
-                    if not result.ok:
-                        return await ctx.send('Error during the toggle of the websites')
-                    return
+                    if args[0] != 'bwin' and args[0] != 'goldbet':
+                        return await ctx.send('The website must be goldbet/bwin')
+                    if not os.path.exists('/usr/src/app/config/settings.in'):
+                        default_settings = {'goldbet': True, 'bwin': True}
+                        with open('/usr/src/app/config/settings.in', 'w') as settings_file:
+                            json.dump(default_settings, settings_file)
+
+                    with open('/usr/src/app/config/settings.in', 'r') as settings_file:
+                        settings = json.load(settings_file)
+                    settings[args[0]] = True if args[1] == 'enable' else False
+
+                    with open('/usr/src/app/config/settings.in', 'w') as settings_file:
+                        json.dump(settings, settings_file)
                 except IndexError:
                     return await ctx.send('Error during the toggle of the websites: website and state are needed')

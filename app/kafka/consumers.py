@@ -212,6 +212,11 @@ class UserAuthConsumer(GenericConsumer):
                                 'Transaction error! User not authorized!'),
                             loop=self._loop)
 
+                        try:
+                            advanced_scheduler.transaction_scheduler.remove_job(msg.key())
+                        except:
+                            pass
+
                     self._consumer.commit(msg)
                 else:
                     logging.warning(f'Null value for the message: {msg.key()}')
