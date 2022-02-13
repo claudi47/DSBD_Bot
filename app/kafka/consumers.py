@@ -189,7 +189,8 @@ class UserAuthConsumer(GenericConsumer):
 
                         if timestamp_tuple[0] != confluent_kafka.TIMESTAMP_NOT_AVAILABLE:
                             if datetime.datetime.now(tz=datetime.timezone.utc) - datetime.datetime.fromtimestamp(
-                                    timestamp_tuple[1] / 1000.0, tz=datetime.timezone.utc) > datetime.timedelta(seconds=20):
+                                    timestamp_tuple[1] / 1000.0, tz=datetime.timezone.utc) > datetime.timedelta(
+                                seconds=20):
                                 producers.partial_search_entry_producer.produce(msg.key(),
                                                                                 SearchDataPartialInDb(
                                                                                     web_site=msg.headers()[1][1].decode(
@@ -217,78 +218,6 @@ class UserAuthConsumer(GenericConsumer):
                         except:
                             pass
 
-                    self._consumer.commit(msg)
-                else:
-                    logging.warning(f'Null value for the message: {msg.key()}')
-                    self._consumer.commit(msg)
-            except Exception as exc:
-                logging.error(exc)
-                try:
-                    self._consumer.commit(msg)
-                except:
-                    pass
-
-                # break
-
-        self._consumer.close()
-
-
-class UserAuthConsumerNormal(GenericConsumer):
-
-    @property
-    def group_id(self):
-        return 'my_group_bot'
-
-    @property
-    def auto_offset_reset(self):
-        return 'earliest'
-
-    @property
-    def auto_commit(self):
-        return False
-
-    @property
-    def topic(self):
-        return 'user_auth'
-
-    @property
-    def schema(self):
-        return """{
-  "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "User Auth reply",
-  "description": "User Auth kafka reply",
-  "type": "object",
-  "properties": {
-    "username": {
-      "description": "Discord username",
-      "type": "string"
-    },
-    "user_id": {
-      "description": "Discord User identifier",
-      "type": "string"
-    }
-  }
-}"""
-
-    def dict_to_model(self, map, ctx):
-        if map is None:
-            return None
-
-        return UserAuthTransfer(**map)
-
-    def parse_website(self):
-        pass
-
-    def _consume_data(self):
-        while not self._cancelled:
-            try:
-                msg = self._consumer.poll(0.1)
-                if msg is None:
-                    continue
-
-                user_auth: UserAuthTransfer = msg.value()
-                if user_auth is not None:
-                    print(f'headers: {msg.headers()}')
                     self._consumer.commit(msg)
                 else:
                     logging.warning(f'Null value for the message: {msg.key()}')
